@@ -503,7 +503,7 @@ let railW = [], railTot = 1;
   // Tocco gestito con touch events (iOS) + pointer events (mouse). Misure prese una volta all'inizio del gesto,
   // aggiornamento della lista al massimo una volta per fotogramma.
   const rail = $('rail'), bub = $('bubble');
-  let cur = -1, hideT, rect = null, tops = [], lastY = null, raf = 0, active = false;
+  let cur = -1, hideT, rect = null, tops = [], lastY = null, goodY = null, raf = 0, active = false, tid = null;
   const idxAt = y => { let t = (y - rect.top) / rect.height * railTot;
     if (t <= 0) return 0;
     for (let i = 0; i < railW.length; i++){ t -= railW[i]; if (t < 0) return i; } return railW.length - 1; };
@@ -516,19 +516,28 @@ let railW = [], railTot = 1;
     bub.innerHTML = `<b class="${isL ? 'big' : ''}">${esc(n)}</b><small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small>`;
     window.scrollTo(0, tops[i]);
   };
-  const move = y => { lastY = y; if (!raf) raf = requestAnimationFrame(frame); };
+  // scarta letture anomale (valori non validi, dito molto fuori dalla barra, salti impossibili): tiene l'ultima buona
+  const move = y => {
+    if (!rect || !Number.isFinite(y)) return;
+    if (y < rect.top - 60 || y > rect.bottom + 60) return;
+    y = Math.max(rect.top + 1, Math.min(rect.bottom - 1, y));
+    if (goodY !== null && Math.abs(y - goodY) > rect.height * 0.6) return;   // salto di oltre metà barra in un solo evento
+    goodY = y; lastY = y; if (!raf) raf = requestAnimationFrame(frame);
+  };
+  const touchY = e => { const t = [...e.touches].find(t => t.identifier === tid) || e.touches[0]; return t ? t.clientY : NaN; };
   const start = y => {
-    active = true; clearTimeout(hideT); cur = -1;
+    active = true; clearTimeout(hideT); cur = -1; goodY = null;
     rect = rail.getBoundingClientRect();
     const hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--head-h')) || 0;
     tops = railGroups.map((_, i) => { const el = $('g' + i); return el ? el.offsetTop - hh + 1 : 0; });
     rail.classList.add('on'); bub.classList.add('on'); move(y);
   };
-  const end = () => { if (!active) return; active = false; lastY = null; rail.classList.remove('on');
+  const end = () => { if (!active) return; active = false; lastY = null; goodY = null; tid = null; rail.classList.remove('on');
     hideT = setTimeout(() => bub.classList.remove('on'), 400); };
-  rail.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); start(e.touches[0].clientY); }, { passive:false });
-  rail.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); if (active) move(e.touches[0].clientY); }, { passive:false });
-  rail.addEventListener('touchend', e => { e.stopPropagation(); end(); });
+  rail.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (active) return;
+    tid = e.changedTouches[0].identifier; start(e.changedTouches[0].clientY); }, { passive:false });
+  rail.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); if (active) move(touchY(e)); }, { passive:false });
+  rail.addEventListener('touchend', e => { e.stopPropagation(); if (![...e.touches].some(t => t.identifier === tid)) end(); });
   rail.addEventListener('touchcancel', end);
   // mouse (computer)
   rail.addEventListener('mousedown', e => { e.preventDefault(); start(e.clientY);

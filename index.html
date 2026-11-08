@@ -74,12 +74,16 @@ body.scrub{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .rail.on{background:linear-gradient(90deg,transparent 14px,var(--surface2) 14px);border-radius:0}
 body.has-rail .card{margin-right:30px}
 body.has-rail .ghead{padding-right:34px}
-.bubble{position:fixed;right:54px;z-index:26;transform:translateY(-50%);pointer-events:none;opacity:0;transition:opacity .15s;
-  background:var(--ink);color:var(--bg);border-radius:16px;padding:10px 18px;max-width:70vw;box-shadow:var(--shadow);text-align:right}
+.bubble{position:fixed;right:52px;width:min(66vw,300px);z-index:26;transform:translateY(-50%);pointer-events:none;opacity:0;
+  transition:opacity .15s;background:var(--ink);color:var(--bg);border-radius:18px;padding:8px 0;box-shadow:var(--shadow)}
 .bubble.on{opacity:1}
-.bubble b{display:block;font-family:var(--serif);font-size:26px;line-height:1.15;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bubble b.big{font-size:48px;text-align:center}
-.bubble small{font-size:12px;opacity:.65;font-weight:600}
+.bubble div{padding:3px 16px;font-size:14.5px;line-height:1.3;opacity:.42;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.bubble div.n1{opacity:.62}
+.bubble div.c{opacity:1;padding:7px 16px;font-family:var(--serif);font-size:25px;font-weight:700;line-height:1.15;
+  background:rgba(127,127,127,.18)}
+.bubble div.c.big{font-size:40px}
+.bubble div.c small{display:block;font-family:var(--sans);font-size:11.5px;font-weight:600;opacity:.65;margin-top:2px}
+.bubble .hint{font-size:10.5px;opacity:.5;padding:4px 16px 0;text-align:right}
 .ghead{position:sticky;top:var(--head-h);z-index:5;display:flex;align-items:baseline;gap:6px;padding:14px 20px 6px;
   background:var(--bg);font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)}
 .ghead span{color:var(--faint);font-weight:600}
@@ -513,31 +517,50 @@ let railW = [], railTot = 1;
   // Tocco gestito con touch events (iOS) + pointer events (mouse). Misure prese una volta all'inizio del gesto,
   // aggiornamento della lista al massimo una volta per fotogramma.
   const rail = $('rail'), bub = $('bubble');
+  // Due velocità: dito veloce = salto diretto alla posizione sulla barra; dito lento = una voce ogni STEP px (precisione).
+  const STEP = 20, FAST = 0.55;        // px per voce, px/ms oltre cui si considera "veloce"
   let cur = -1, hideT, rect = null, tops = [], lastY = null, goodY = null, raf = 0, active = false, tid = null;
-  let cells = [], items = [];
-  // indice = l'elemento disegnato sotto il dito (posizioni reali, nessuna formula)
-  const idxAt = y => {
+  let cells = [], items = [], anchorY = 0, anchorI = 0, prevY = 0, prevT = 0;
+  const idxAt = y => {                 // voce disegnata sotto il dito
     if (y <= cells[0]) return 0;
     let lo = 0, hi = cells.length - 1;
     while (lo < hi){ const m = (lo + hi + 1) >> 1; if (cells[m] <= y) lo = m; else hi = m - 1; }
     return lo;
   };
-  const frame = () => {
-    raf = 0; if (lastY === null || !rect) return;
-    const y = lastY, i = idxAt(y);
-    bub.style.top = Math.max(rect.top + 34, Math.min(rect.bottom - 34, y - 46)) + 'px';
+  const clampI = i => Math.max(0, Math.min(railGroups.length - 1, i));
+  const lensHTML = i => {
+    const out = [];
+    for (let k = i - 3; k <= i + 3; k++){
+      if (k < 0 || k >= railGroups.length){ out.push('<div>&nbsp;</div>'); continue; }
+      const [n, arr, isL] = railGroups[k];
+      if (k === i) out.push(`<div class="c${isL ? ' big' : ''}">${esc(n)}<small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small></div>`);
+      else out.push(`<div class="${Math.abs(k - i) === 1 ? 'n1' : ''}">${esc(n)}</div>`);
+    }
+    return out.join('') + '<div class="hint">piano = una alla volta · veloce = salta</div>';
+  };
+  const show = (i, y) => {
+    bub.style.top = Math.max(rect.top + 120, Math.min(rect.bottom - 120, y)) + 'px';
     if (i === cur) return;
     items[cur]?.classList.remove('cur'); items[i]?.classList.add('cur'); cur = i;
-    const [n, arr, isL] = railGroups[i];
-    bub.innerHTML = `<b class="${isL ? 'big' : ''}">${esc(n)}</b><small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small>`;
+    bub.innerHTML = lensHTML(i);
     window.scrollTo(0, tops[i]);
   };
-  // scarta letture anomale (valori non validi, dito molto fuori dalla barra, salti impossibili): tiene l'ultima buona
+  const frame = () => {
+    raf = 0; if (lastY === null || !rect) return;
+    const y = lastY, now = performance.now();
+    const v = Math.abs(y - prevY) / Math.max(1, now - prevT);
+    let i;
+    if (v > FAST || y <= rect.top + 3 || y >= rect.bottom - 3){ i = idxAt(y); anchorY = y; anchorI = i; }   // salto
+    else i = clampI(anchorI + Math.trunc((y - anchorY) / STEP));                                            // passo singolo
+    prevY = y; prevT = now;
+    show(i, y);
+  };
+  // scarta letture anomale (valori non validi, dito molto fuori dalla barra, salti impossibili)
   const move = y => {
     if (!rect || !Number.isFinite(y)) return;
     if (y < rect.top - 60 || y > rect.bottom + 60) return;
     y = Math.max(rect.top + 1, Math.min(rect.bottom - 1, y));
-    if (goodY !== null && Math.abs(y - goodY) > rect.height * 0.6) return;   // salto di oltre metà barra in un solo evento
+    if (goodY !== null && Math.abs(y - goodY) > rect.height * 0.6) return;
     goodY = y; lastY = y; if (!raf) raf = requestAnimationFrame(frame);
   };
   const touchY = e => { const t = [...e.touches].find(t => t.identifier === tid) || e.touches[0]; return t ? t.clientY : NaN; };
@@ -548,11 +571,14 @@ let railW = [], railTot = 1;
     document.body.classList.add('scrub');
     const hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--head-h')) || 0;
     tops = railGroups.map((_, i) => { const el = $('g' + i); return el ? el.offsetTop - hh + 1 : 0; });
-    rail.classList.add('on'); bub.classList.add('on'); move(y);
+    rail.classList.add('on'); bub.classList.add('on');
+    const yy = Math.max(rect.top + 1, Math.min(rect.bottom - 1, y));
+    anchorY = prevY = goodY = yy; anchorI = idxAt(yy); prevT = performance.now();
+    show(anchorI, yy);
   };
   const end = () => { if (!active) return; active = false; lastY = null; goodY = null; tid = null; rail.classList.remove('on');
     document.body.classList.remove('scrub'); items[cur]?.classList.remove('cur');
-    hideT = setTimeout(() => bub.classList.remove('on'), 400); };
+    hideT = setTimeout(() => bub.classList.remove('on'), 500); };
   rail.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (active) return;
     tid = e.changedTouches[0].identifier; start(e.changedTouches[0].clientY); }, { passive:false });
   rail.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); if (active) move(touchY(e)); }, { passive:false });

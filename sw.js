@@ -1,6 +1,6 @@
 // Service worker: l'app si apre anche offline. I dati stanno nel telefono (localStorage),
 // le chiamate allo script Google passano sempre dalla rete.
-const VERSION = 'voc-v6';
+const VERSION = 'voc-v7';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

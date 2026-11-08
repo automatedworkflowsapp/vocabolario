@@ -29,6 +29,7 @@
 }}
 @media (prefers-color-scheme:dark){:root .fab,:root .addq,:root .onb .go{background:#2F6E96}:root .today{background:#1E4D6B}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{touch-action:manipulation}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;
   -webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;overscroll-behavior-y:none}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
@@ -65,6 +66,11 @@ main{padding-top:var(--head-h);padding-bottom:calc(96px + var(--safe-b))}
   color:var(--accent);line-height:1;min-height:0}
 .rail i.dot::before{content:"";width:4px;height:4px;border-radius:2px;background:var(--accent);opacity:.45}
 .rail i.cdot::before{content:"";width:3px;height:3px;border-radius:2px;background:var(--faint)}
+.rail,.rail *,.bubble{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.rail i{transition:transform .08s}
+.rail i.cur{transform:scale(1.9);transform-origin:right center;color:var(--gold)}
+.rail i.cur:empty::before{content:"";background:var(--gold)!important;opacity:1!important;width:10px!important;height:4px!important;border-radius:2px}
+body.scrub{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .rail.on{background:linear-gradient(90deg,transparent 14px,var(--surface2) 14px);border-radius:0}
 body.has-rail .card{margin-right:30px}
 body.has-rail .ghead{padding-right:34px}
@@ -504,14 +510,20 @@ let railW = [], railTot = 1;
   // aggiornamento della lista al massimo una volta per fotogramma.
   const rail = $('rail'), bub = $('bubble');
   let cur = -1, hideT, rect = null, tops = [], lastY = null, goodY = null, raf = 0, active = false, tid = null;
-  const idxAt = y => { let t = (y - rect.top) / rect.height * railTot;
-    if (t <= 0) return 0;
-    for (let i = 0; i < railW.length; i++){ t -= railW[i]; if (t < 0) return i; } return railW.length - 1; };
+  let cells = [], items = [];
+  // indice = l'elemento disegnato sotto il dito (posizioni reali, nessuna formula)
+  const idxAt = y => {
+    if (y <= cells[0]) return 0;
+    let lo = 0, hi = cells.length - 1;
+    while (lo < hi){ const m = (lo + hi + 1) >> 1; if (cells[m] <= y) lo = m; else hi = m - 1; }
+    return lo;
+  };
   const frame = () => {
     raf = 0; if (lastY === null || !rect) return;
     const y = lastY, i = idxAt(y);
-    bub.style.top = Math.max(rect.top + 34, Math.min(rect.bottom - 34, y)) + 'px';
-    if (i === cur) return; cur = i;
+    bub.style.top = Math.max(rect.top + 34, Math.min(rect.bottom - 34, y - 46)) + 'px';
+    if (i === cur) return;
+    items[cur]?.classList.remove('cur'); items[i]?.classList.add('cur'); cur = i;
     const [n, arr, isL] = railGroups[i];
     bub.innerHTML = `<b class="${isL ? 'big' : ''}">${esc(n)}</b><small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small>`;
     window.scrollTo(0, tops[i]);
@@ -528,17 +540,21 @@ let railW = [], railTot = 1;
   const start = y => {
     active = true; clearTimeout(hideT); cur = -1; goodY = null;
     rect = rail.getBoundingClientRect();
+    items = [...rail.children]; cells = items.map(el => el.getBoundingClientRect().top);
+    document.body.classList.add('scrub');
     const hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--head-h')) || 0;
     tops = railGroups.map((_, i) => { const el = $('g' + i); return el ? el.offsetTop - hh + 1 : 0; });
     rail.classList.add('on'); bub.classList.add('on'); move(y);
   };
   const end = () => { if (!active) return; active = false; lastY = null; goodY = null; tid = null; rail.classList.remove('on');
+    document.body.classList.remove('scrub'); items[cur]?.classList.remove('cur');
     hideT = setTimeout(() => bub.classList.remove('on'), 400); };
   rail.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (active) return;
     tid = e.changedTouches[0].identifier; start(e.changedTouches[0].clientY); }, { passive:false });
   rail.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); if (active) move(touchY(e)); }, { passive:false });
   rail.addEventListener('touchend', e => { e.stopPropagation(); if (![...e.touches].some(t => t.identifier === tid)) end(); });
   rail.addEventListener('touchcancel', end);
+  rail.addEventListener('contextmenu', e => e.preventDefault());
   // mouse (computer)
   rail.addEventListener('mousedown', e => { e.preventDefault(); start(e.clientY);
     const mm = ev => move(ev.clientY), mu = () => { end(); removeEventListener('mousemove', mm); removeEventListener('mouseup', mu); };

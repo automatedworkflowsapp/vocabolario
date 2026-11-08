@@ -668,10 +668,14 @@ function openSettings(){
 /* =================================================================== onboarding */
 async function connect(){
   const raw = $('onbCode').value.trim(); const err = $('onbErr'); err.textContent = '';
-  const m = raw.match(/(https:\/\/script\.google(?:usercontent)?\.com\/\S+?)\s*\|\s*([A-Za-z0-9_-]{3,})/);
-  if (!m) return err.textContent = 'Formato non riconosciuto. Deve essere URL|token';
-  if (/\/dev$/.test(m[1])) return err.textContent = 'Usa l’URL che finisce con /exec, non /dev';
-  st.cfg = { url:m[1], token:m[2] };
+  // tollerante: qualunque separatore (|, ｜, spazio, a capo), URL e token in qualsiasi ordine
+  const u = raw.match(/https:\/\/script\.google(?:usercontent)?\.com\/macros\/s\/[A-Za-z0-9_-]+\/(exec|dev)/);
+  if (!u) return err.textContent = 'Manca l’URL dello script (inizia con https://script.google.com/macros/s/…/exec)';
+  if (u[1] === 'dev') return err.textContent = 'Usa l’URL che finisce con /exec, non /dev';
+  const rest = raw.replace(u[0], ' ').replace(/https?:\/\/\S*/g, ' ');
+  const tk = (rest.match(/[A-Za-z0-9_-]{12,}/g) || []).pop();
+  if (!tk) return err.textContent = 'Manca il token: incollalo dopo l’URL, separato da |';
+  st.cfg = { url:u[0], token:tk };
   $('onbGo').disabled = true; $('onbGo').textContent = 'Collego…';
   try {
     const r = await api('GET', {});

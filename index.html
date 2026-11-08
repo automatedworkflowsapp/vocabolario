@@ -74,16 +74,12 @@ body.scrub{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .rail.on{background:linear-gradient(90deg,transparent 14px,var(--surface2) 14px);border-radius:0}
 body.has-rail .card{margin-right:30px}
 body.has-rail .ghead{padding-right:34px}
-.bubble{position:fixed;right:52px;width:min(66vw,300px);z-index:26;transform:translateY(-50%);pointer-events:none;opacity:0;
-  transition:opacity .15s;background:var(--ink);color:var(--bg);border-radius:18px;padding:8px 0;box-shadow:var(--shadow)}
+.bubble{position:fixed;right:54px;z-index:26;transform:translateY(-50%);pointer-events:none;opacity:0;transition:opacity .15s;
+  background:var(--ink);color:var(--bg);border-radius:16px;padding:10px 18px;max-width:70vw;box-shadow:var(--shadow);text-align:right}
 .bubble.on{opacity:1}
-.bubble div{padding:3px 16px;font-size:14.5px;line-height:1.3;opacity:.42;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
-.bubble div.n1{opacity:.62}
-.bubble div.c{opacity:1;padding:7px 16px;font-family:var(--serif);font-size:25px;font-weight:700;line-height:1.15;
-  background:rgba(127,127,127,.18)}
-.bubble div.c.big{font-size:40px}
-.bubble div.c small{display:block;font-family:var(--sans);font-size:11.5px;font-weight:600;opacity:.65;margin-top:2px}
-.bubble .hint{font-size:10.5px;opacity:.5;padding:4px 16px 0;text-align:right}
+.bubble b{display:block;font-family:var(--serif);font-size:26px;line-height:1.15;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bubble b.big{font-size:48px;text-align:center}
+.bubble small{font-size:12px;opacity:.65;font-weight:600}
 .ghead{position:sticky;top:var(--head-h);z-index:5;display:flex;align-items:baseline;gap:6px;padding:14px 20px 6px;
   background:var(--bg);font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)}
 .ghead span{color:var(--faint);font-weight:600}
@@ -147,7 +143,7 @@ mark{background:var(--gold-soft);color:inherit;border-radius:3px;padding:0 1px}
 .shead .ttl{flex:1;text-align:center;font-weight:600;font-size:17px;padding-top:10px}
 .sbtn{min-width:72px;height:40px;padding:10px 10px 0;color:var(--accent);font-size:17px}
 .sbtn.bold{font-weight:600} .sbtn:disabled{color:var(--faint)}
-.sbody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 0 calc(24px + var(--safe-b))}
+.sbody{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:4px 0 calc(24px + var(--safe-b))}
 
 /* dettaglio */
 .dt{padding:12px 22px 0}
@@ -517,50 +513,31 @@ let railW = [], railTot = 1;
   // Tocco gestito con touch events (iOS) + pointer events (mouse). Misure prese una volta all'inizio del gesto,
   // aggiornamento della lista al massimo una volta per fotogramma.
   const rail = $('rail'), bub = $('bubble');
-  // Due velocità: dito veloce = salto diretto alla posizione sulla barra; dito lento = una voce ogni STEP px (precisione).
-  const STEP = 20, FAST = 0.55;        // px per voce, px/ms oltre cui si considera "veloce"
   let cur = -1, hideT, rect = null, tops = [], lastY = null, goodY = null, raf = 0, active = false, tid = null;
-  let cells = [], items = [], anchorY = 0, anchorI = 0, prevY = 0, prevT = 0;
-  const idxAt = y => {                 // voce disegnata sotto il dito
+  let cells = [], items = [];
+  // indice = l'elemento disegnato sotto il dito (posizioni reali, nessuna formula)
+  const idxAt = y => {
     if (y <= cells[0]) return 0;
     let lo = 0, hi = cells.length - 1;
     while (lo < hi){ const m = (lo + hi + 1) >> 1; if (cells[m] <= y) lo = m; else hi = m - 1; }
     return lo;
   };
-  const clampI = i => Math.max(0, Math.min(railGroups.length - 1, i));
-  const lensHTML = i => {
-    const out = [];
-    for (let k = i - 3; k <= i + 3; k++){
-      if (k < 0 || k >= railGroups.length){ out.push('<div>&nbsp;</div>'); continue; }
-      const [n, arr, isL] = railGroups[k];
-      if (k === i) out.push(`<div class="c${isL ? ' big' : ''}">${esc(n)}<small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small></div>`);
-      else out.push(`<div class="${Math.abs(k - i) === 1 ? 'n1' : ''}">${esc(n)}</div>`);
-    }
-    return out.join('') + '<div class="hint">piano = una alla volta · veloce = salta</div>';
-  };
-  const show = (i, y) => {
-    bub.style.top = Math.max(rect.top + 120, Math.min(rect.bottom - 120, y)) + 'px';
-    if (i === cur) return;
-    items[cur]?.classList.remove('cur'); items[i]?.classList.add('cur'); cur = i;
-    bub.innerHTML = lensHTML(i);
-    window.scrollTo(0, tops[i]);
-  };
   const frame = () => {
     raf = 0; if (lastY === null || !rect) return;
-    const y = lastY, now = performance.now();
-    const v = Math.abs(y - prevY) / Math.max(1, now - prevT);
-    let i;
-    if (v > FAST || y <= rect.top + 3 || y >= rect.bottom - 3){ i = idxAt(y); anchorY = y; anchorI = i; }   // salto
-    else i = clampI(anchorI + Math.trunc((y - anchorY) / STEP));                                            // passo singolo
-    prevY = y; prevT = now;
-    show(i, y);
+    const y = lastY, i = idxAt(y);
+    bub.style.top = Math.max(rect.top + 34, Math.min(rect.bottom - 34, y - 46)) + 'px';
+    if (i === cur) return;
+    items[cur]?.classList.remove('cur'); items[i]?.classList.add('cur'); cur = i;
+    const [n, arr, isL] = railGroups[i];
+    bub.innerHTML = `<b class="${isL ? 'big' : ''}">${esc(n)}</b><small>${isL ? 'Senza categoria · ' : ''}${arr.length} ${arr.length === 1 ? 'voce' : 'voci'}</small>`;
+    window.scrollTo(0, tops[i]);
   };
-  // scarta letture anomale (valori non validi, dito molto fuori dalla barra, salti impossibili)
+  // scarta letture anomale (valori non validi, dito molto fuori dalla barra, salti impossibili): tiene l'ultima buona
   const move = y => {
     if (!rect || !Number.isFinite(y)) return;
     if (y < rect.top - 60 || y > rect.bottom + 60) return;
     y = Math.max(rect.top + 1, Math.min(rect.bottom - 1, y));
-    if (goodY !== null && Math.abs(y - goodY) > rect.height * 0.6) return;
+    if (goodY !== null && Math.abs(y - goodY) > rect.height * 0.6) return;   // salto di oltre metà barra in un solo evento
     goodY = y; lastY = y; if (!raf) raf = requestAnimationFrame(frame);
   };
   const touchY = e => { const t = [...e.touches].find(t => t.identifier === tid) || e.touches[0]; return t ? t.clientY : NaN; };
@@ -571,14 +548,11 @@ let railW = [], railTot = 1;
     document.body.classList.add('scrub');
     const hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--head-h')) || 0;
     tops = railGroups.map((_, i) => { const el = $('g' + i); return el ? el.offsetTop - hh + 1 : 0; });
-    rail.classList.add('on'); bub.classList.add('on');
-    const yy = Math.max(rect.top + 1, Math.min(rect.bottom - 1, y));
-    anchorY = prevY = goodY = yy; anchorI = idxAt(yy); prevT = performance.now();
-    show(anchorI, yy);
+    rail.classList.add('on'); bub.classList.add('on'); move(y);
   };
   const end = () => { if (!active) return; active = false; lastY = null; goodY = null; tid = null; rail.classList.remove('on');
     document.body.classList.remove('scrub'); items[cur]?.classList.remove('cur');
-    hideT = setTimeout(() => bub.classList.remove('on'), 500); };
+    hideT = setTimeout(() => bub.classList.remove('on'), 400); };
   rail.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (active) return;
     tid = e.changedTouches[0].identifier; start(e.changedTouches[0].clientY); }, { passive:false });
   rail.addEventListener('touchmove', e => { e.preventDefault(); e.stopPropagation(); if (active) move(touchY(e)); }, { passive:false });
@@ -633,6 +607,25 @@ function renderSearch(){
 
 /* =================================================================== fogli modali */
 let sheetOnClose = null;
+/* Pagina sotto bloccata mentre un foglio è aperto: su iPhone, se la pagina scorre quando si apre la tastiera,
+   cursore e lente vengono disegnati spostati rispetto al testo dei campi in un riquadro fisso. */
+let lockedY = null;
+function lockPage(){
+  if (lockedY !== null) return;
+  lockedY = window.scrollY;
+  Object.assign(document.body.style, { position:'fixed', top: -lockedY + 'px', left:'0', right:'0', width:'100%', overflow:'hidden' });
+}
+function unlockPage(){
+  if (lockedY === null) return;
+  const y = lockedY; lockedY = null;
+  Object.assign(document.body.style, { position:'', top:'', left:'', right:'', width:'', overflow:'' });
+  window.scrollTo(0, y);
+}
+// campo toccato nel foglio: portalo al centro dell'area visibile sopra la tastiera
+$('sBody').addEventListener('focusin', e => {
+  if (!e.target.matches('input,textarea')) return;
+  setTimeout(() => { window.scrollTo(0, 0); e.target.scrollIntoView({ block:'center', behavior:'smooth' }); }, 320);
+});
 function openSheet({ title='', left='', right='', body='', short=false, onLeft, onRight, onClose }){
   $('sTitle').textContent = title; $('sLeft').textContent = left; $('sRight').textContent = right;
   $('sLeft').classList.toggle('hidden', !left); $('sRight').classList.toggle('hidden', !right);
@@ -640,12 +633,14 @@ function openSheet({ title='', left='', right='', body='', short=false, onLeft, 
   $('sLeft').onclick = onLeft || closeSheet; $('sRight').onclick = onRight || null;
   $('sBody').innerHTML = body; $('sBody').scrollTop = 0;
   $('sheet').classList.toggle('short', short);
+  lockPage();
   $('sheet').classList.add('open'); $('backdrop').classList.add('on');
   sheetOnClose = onClose || null;
 }
 function closeSheet(){
   document.activeElement?.blur();
   $('sheet').classList.remove('open'); $('backdrop').classList.remove('on');
+  unlockPage();
   st.open = null; sheetOnClose && sheetOnClose(); sheetOnClose = null;
 }
 // trascina giù per chiudere

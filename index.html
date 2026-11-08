@@ -97,7 +97,7 @@ body.has-rail .ghead{padding-right:34px}
 .row.common::after{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--gold)}
 .tag{display:inline-block;margin-left:6px;vertical-align:2px;font-family:var(--sans);font-size:10px;font-weight:700;
   letter-spacing:.5px;color:var(--gold);text-transform:uppercase}
-.tag.blue{color:var(--accent)} .tag.pend{color:var(--muted)}
+.tag.blue{color:var(--accent)} .tag.ok{color:#2E9E4F} .tag.pend{color:var(--muted)}
 mark{background:var(--gold-soft);color:inherit;border-radius:3px;padding:0 1px}
 .empty{padding:60px 32px;text-align:center;color:var(--muted);line-height:1.5}
 .empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:4px}
@@ -332,6 +332,7 @@ function applyOp(m, op){
   const sec = m[op.sheet]; if (!sec) return;
   if (op.type === 'add'){
     const f = { ...op.fields }; if ('Comuni' in f) f.Comuni = f.Comuni ? '1' : '';
+    for (const k in f) if (typeof f[k] === 'boolean') f[k] = f[k] ? 'TRUE' : 'FALSE';
     const it = { row:null, f, pending:true };
     let pos = sec.items.length;
     if (sec.headers.includes('Categoria')){
@@ -343,6 +344,7 @@ function applyOp(m, op){
   } else if (op.type === 'update'){
     const i = findItem(m, op.sheet, op.key, op.row); if (i < 0) return;
     const f = { ...op.fields }; if ('Comuni' in f) f.Comuni = f.Comuni ? '1' : '';
+    for (const k in f) if (typeof f[k] === 'boolean') f[k] = f[k] ? 'TRUE' : 'FALSE';
     Object.assign(sec.items[i].f, f); sec.items[i].pending = true;
   } else if (op.type === 'delete'){
     const i = findItem(m, op.sheet, op.key, op.row); if (i >= 0) sec.items.splice(i, 1);
@@ -387,7 +389,7 @@ async function sync({ silent=false } = {}){
     }
     if (!st.outbox.length){
       const r = await api('GET', {});
-      st.base = { data:r.data, ts:r.ts, url:r.url };
+      st.base = { data:r.data, ts:r.ts, url:r.url, v:r.v };
     }
     st.base.ts = Date.now(); st.lastError = null;
     save(LS.data, st.base); save(LS.out, st.outbox);
@@ -429,6 +431,7 @@ function rowHTML(s, it, idx, hl){
   let tag = '';
   if (isCommon(it.f.Comuni)) tag += '<span class="tag">Comune</span>';
   if (s.id==='Persuasione' && it.f.Tipo) tag += `<span class="tag blue">${esc(it.f.Tipo)}</span>`;
+  for (const x of extrasOf(s.id)) if (x.bool && isTrue(it.f[x.h])) tag += `<span class="tag ok">✓ ${esc(x.h)}</span>`;
   if (it.pending) tag += '<span class="tag pend">● in attesa</span>';
   let prev = it.f[s.prev] || '';
   if (s.id==='Frasi') prev = it.f.Fonte ? '— ' + it.f.Fonte : '';
@@ -625,6 +628,20 @@ function closeSheet(){
   h.addEventListener('touchend', () => { sh.style.transition = ''; sh.style.transform = ''; if (dy > 110) closeSheet(); y0 = null; });
 })();
 
+/* ---------- colonne aggiunte nello Sheet (es. Check) ---------- */
+const BOOL = v => ['TRUE','VERO','FALSE','FALSO',''].includes(String(v ?? '').trim().toUpperCase());
+const isTrue = v => ['TRUE','VERO'].includes(String(v ?? '').trim().toUpperCase()) || v === true;
+function extrasOf(sid){
+  const known = new Set(SEC[sid].fields.map(f => f.h).concat(['#']));
+  const hs = st.model[sid]?.headers || [], items = st.model[sid]?.items || [];
+  return hs.filter(h => h && !known.has(h)).map(h => {
+    const vals = items.map(it => it.f[h]);
+    const bool = vals.some(v => String(v ?? '').trim() !== '') && vals.every(BOOL);
+    return { h, bool };
+  });
+}
+const canWriteBool = () => (st.base?.v || 1) >= 2;
+
 /* ---------- dettaglio ---------- */
 function openDetail(sid, i){
   const s = SEC[sid], it = st.model[sid].items[i]; if (!it) return;
@@ -636,6 +653,8 @@ function openDetail(sid, i){
   if (f.Categoria) badges.push(`<span class="badge">${esc(f.Categoria)}</span>`);
   const fonte = f.Source || (sid !== 'Frasi' ? f.Fonte : '');
   if (fonte) badges.push(`<span class="badge grey">Fonte · ${esc(fonte)}</span>`);
+  const ex = extrasOf(sid);
+  for (const x of ex) if (x.bool && isTrue(f[x.h])) badges.push(`<span class="badge" style="background:#E3F4E8;color:#2E9E4F">✓ ${esc(x.h)}</span>`);
   if (it.pending) badges.push('<span class="badge grey">In attesa di sincronizzazione</span>');
   const kcls = 'k' + (s.italic ? ' it' : '') + (s.phrase ? ' phrase' : '');
   b.push(`<div class="dt"><div class="${kcls}">${esc(it.key || '')}</div>`);
@@ -647,6 +666,7 @@ function openDetail(sid, i){
     if (sid === 'Persuasione') b.push(`<h3>Esempio</h3><div class="box">${esc(f.Esempio.trim())}</div>`);
     else { const ex = lines(f.Esempio); if (ex.length) b.push(`<h3>${ex.length > 1 ? 'Esempi' : 'Esempio'}</h3><ul>${ex.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`); }
   }
+  for (const x of ex) if (!x.bool && String(f[x.h] ?? '').trim()) b.push(`<h3>${esc(x.h)}</h3><div class="txt">${esc(f[x.h])}</div>`);
   b.push('</div><div class="actions">');
   if (sid === 'Vocab') b.push(`<button class="act ${isCommon(f.Comuni)?'on':''}" id="aStar"><svg viewBox="0 0 24 24" fill="${isCommon(f.Comuni)?'currentColor':'none'}" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>Comune</button>`);
   b.push(`<button class="act" id="aCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>Copia</button>`);
@@ -694,7 +714,18 @@ function openForm(sid, it=null, prefill=''){
         flush(); grp.push(`<div class="field toggle"><label>${fd.label}</label><button class="sw ${isCommon(v)?'on':''}" data-tog="${fd.h}" aria-label="${fd.label}"></button></div>`); flush();
       }
     }
-    flush(); h.push('</div>');
+    flush();
+    const ex = extrasOf(cur);
+    if (ex.length){
+      for (const x of ex){
+        if (x.bool) grp.push(canWriteBool()
+          ? `<div class="field toggle"><label>${esc(x.h)}</label><button class="sw ${isTrue(vals[x.h])?'on':''}" data-tog="${esc(x.h)}" aria-label="${esc(x.h)}"></button></div>`
+          : `<div class="field toggle"><label>${esc(x.h)}</label><span class="hint">Aggiorna lo script per modificarlo</span></div>`);
+        else grp.push(`<div class="field"><label>${esc(x.h)}</label><input data-h="${esc(x.h)}" value="${esc(vals[x.h] ?? '')}"></div>`);
+      }
+      flush();
+    }
+    h.push('</div>');
     $('sBody').innerHTML = h.join('');
     wire();
   };
@@ -724,10 +755,15 @@ function openForm(sid, it=null, prefill=''){
     collect(); const s = SEC[cur];
     const fields = {}; for (const fd of s.fields) if (st.model[cur].headers.includes(fd.h)) {
       let v = vals[fd.h]; if (fd.type !== 'toggle') v = String(v ?? '').trim(); else v = !!(v === true || isCommon(v)); fields[fd.h] = v; }
+    const exB = new Set();
+    for (const x of extrasOf(cur)){
+      if (x.bool){ if (canWriteBool()){ fields[x.h] = isTrue(vals[x.h]); exB.add(x.h); } }
+      else fields[x.h] = String(vals[x.h] ?? '').trim();
+    }
     if (!fields[s.key]) return toast('Il campo ' + s.fields[0].label + ' è obbligatorio');
     if (edit){
       const changed = {}; for (const [h, v] of Object.entries(fields)){
-        const old = h === 'Comuni' ? isCommon(it.f[h]) : String(it.f[h] ?? '').trim(); if (old !== v) changed[h] = v; }
+        const old = h === 'Comuni' ? isCommon(it.f[h]) : exB.has(h) ? isTrue(it.f[h]) : String(it.f[h] ?? '').trim(); if (old !== v) changed[h] = v; }
       if (Object.keys(changed).length) queue({ type:'update', sheet:cur, row:it.row, key:it.key, fields:changed });
       const i = findItem(st.model, cur, fields[s.key], it.row); closeSheet(); if (i >= 0) setTimeout(() => openDetail(cur, i), 340);
       toast(Object.keys(changed).length ? 'Salvato' : 'Nessuna modifica');
@@ -789,7 +825,7 @@ async function connect(){
   $('onbGo').disabled = true; $('onbGo').textContent = 'Collego…';
   try {
     const r = await api('GET', {});
-    st.base = { data:r.data, ts:Date.now(), url:r.url };
+    st.base = { data:r.data, ts:Date.now(), url:r.url, v:r.v };
     save(LS.cfg, st.cfg); save(LS.data, st.base);
     $('onb').classList.add('hidden'); buildModel(); render();
     toast(`Collegato: ${SECTIONS.reduce((a,s) => a + (st.model[s.id]?.items.length||0), 0).toLocaleString('it-IT')} voci`);

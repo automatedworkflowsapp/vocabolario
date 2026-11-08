@@ -163,7 +163,8 @@ mark{background:var(--gold-soft);color:inherit;border-radius:3px;padding:0 1px}
 .actions{display:flex;gap:10px;padding:26px 22px 8px}
 .act{flex:1;height:48px;border-radius:12px;background:var(--surface);font-weight:600;font-size:15px;display:flex;align-items:center;
   justify-content:center;gap:6px;color:var(--accent)}
-.act svg{width:18px;height:18px} .act.red{color:var(--danger)} .act.on{color:var(--gold)}
+.act svg{width:18px;height:18px} .act.red{color:var(--danger)} .act.on{color:var(--gold)} .act.ok{color:#2E9E4F}
+.actions{flex-wrap:wrap} .act{min-width:calc(50% - 5px)}
 
 /* form */
 .form{padding:6px 16px}
@@ -629,18 +630,27 @@ function closeSheet(){
 })();
 
 /* ---------- colonne aggiunte nello Sheet (es. Check) ---------- */
-const BOOL = v => ['TRUE','VERO','FALSE','FALSO',''].includes(String(v ?? '').trim().toUpperCase());
-const isTrue = v => ['TRUE','VERO'].includes(String(v ?? '').trim().toUpperCase()) || v === true;
+// Colonne sì/no: caselle di spunta (TRUE/FALSE) oppure 1/vuoto, x, sì/no, ✓. Si riscrive nello stesso stile della colonna.
+const UP = v => String(v ?? '').trim().toUpperCase();
+const YES = ['TRUE','VERO','1','X','SÌ','SI','YES','✓','✔'], NO = ['FALSE','FALSO','0','NO',''];
+const isTrue = v => v === true || YES.includes(UP(v));
+const YESNO_NAME = /check|verific|controll|fatto|ripassat|ok\b|done|imparat/i;
 function extrasOf(sid){
   const known = new Set(SEC[sid].fields.map(f => f.h).concat(['#']));
   const hs = st.model[sid]?.headers || [], items = st.model[sid]?.items || [];
   return hs.filter(h => h && !known.has(h)).map(h => {
-    const vals = items.map(it => it.f[h]);
-    const bool = vals.some(v => String(v ?? '').trim() !== '') && vals.every(BOOL);
-    return { h, bool };
+    const vals = items.map(it => UP(it.f[h])), filled = vals.filter(Boolean);
+    const allYesNo = vals.every(v => YES.includes(v) || NO.includes(v));
+    const bool = allYesNo && (filled.length > 0 || YESNO_NAME.test(h));
+    let style = 'one';                                           // default: 1 / vuoto (come Comuni)
+    if (filled.some(v => ['TRUE','FALSE','VERO','FALSO'].includes(v))) style = 'bool';
+    else if (filled.some(v => v === 'X')) style = 'x';
+    else if (filled.some(v => ['SÌ','SI','NO'].includes(v))) style = 'si';
+    return { h, bool, style };
   });
 }
-const canWriteBool = () => (st.base?.v || 1) >= 2;
+const yesNoValue = (x, on) => x.style === 'bool' ? on : x.style === 'x' ? (on ? 'x' : '') : x.style === 'si' ? (on ? 'Sì' : 'No') : (on ? '1' : '');
+const canWriteBool = x => !x || x.style !== 'bool' || (st.base?.v || 1) >= 2;
 
 /* ---------- dettaglio ---------- */
 function openDetail(sid, i){
@@ -669,12 +679,17 @@ function openDetail(sid, i){
   for (const x of ex) if (!x.bool && String(f[x.h] ?? '').trim()) b.push(`<h3>${esc(x.h)}</h3><div class="txt">${esc(f[x.h])}</div>`);
   b.push('</div><div class="actions">');
   if (sid === 'Vocab') b.push(`<button class="act ${isCommon(f.Comuni)?'on':''}" id="aStar"><svg viewBox="0 0 24 24" fill="${isCommon(f.Comuni)?'currentColor':'none'}" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>Comune</button>`);
+  ex.filter(x => x.bool && canWriteBool(x)).forEach((x, k) => b.push(`<button class="act ${isTrue(f[x.h])?'ok':''}" data-yn="${k}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${isTrue(f[x.h]) ? '<path d="m5 12.5 4.5 4.5L19 7"/>' : '<rect x="4" y="4" width="16" height="16" rx="4"/>'}</svg>${esc(x.h)}</button>`));
   b.push(`<button class="act" id="aCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>Copia</button>`);
   b.push(`<button class="act red" id="aDel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Elimina</button></div>`);
   openSheet({ title: s.label, left:'Chiudi', right:'Modifica', body:b.join(''), onRight:() => openForm(sid, it) });
   $('aCopy').onclick = () => { navigator.clipboard?.writeText([it.key, f.Significato || f.Concetto, f.Esempio].filter(Boolean).join('\n\n')); toast('Copiato'); };
   $('aDel').onclick = () => { if (!confirm(`Eliminare «${it.title}» anche dallo Sheet?`)) return;
     queue({ type:'delete', sheet:sid, row:it.row, key:it.key }); closeSheet(); toast('Eliminato'); };
+  const ynx = ex.filter(x => x.bool && canWriteBool(x));
+  $('sBody').querySelectorAll('[data-yn]').forEach(btn => btn.onclick = () => { const x = ynx[+btn.dataset.yn];
+    queue({ type:'update', sheet:sid, row:it.row, key:it.key, fields:{ [x.h]: yesNoValue(x, !isTrue(f[x.h])) } });
+    openDetail(sid, findItem(st.model, sid, it.key, it.row)); });
   if ($('aStar')) $('aStar').onclick = () => { queue({ type:'update', sheet:sid, row:it.row, key:it.key, fields:{ Comuni: !isCommon(f.Comuni) } });
     const ni = findItem(st.model, sid, it.key, it.row); openDetail(sid, ni); };
 }
@@ -718,7 +733,7 @@ function openForm(sid, it=null, prefill=''){
     const ex = extrasOf(cur);
     if (ex.length){
       for (const x of ex){
-        if (x.bool) grp.push(canWriteBool()
+        if (x.bool) grp.push(canWriteBool(x)
           ? `<div class="field toggle"><label>${esc(x.h)}</label><button class="sw ${isTrue(vals[x.h])?'on':''}" data-tog="${esc(x.h)}" aria-label="${esc(x.h)}"></button></div>`
           : `<div class="field toggle"><label>${esc(x.h)}</label><span class="hint">Aggiorna lo script per modificarlo</span></div>`);
         else grp.push(`<div class="field"><label>${esc(x.h)}</label><input data-h="${esc(x.h)}" value="${esc(vals[x.h] ?? '')}"></div>`);
@@ -755,15 +770,17 @@ function openForm(sid, it=null, prefill=''){
     collect(); const s = SEC[cur];
     const fields = {}; for (const fd of s.fields) if (st.model[cur].headers.includes(fd.h)) {
       let v = vals[fd.h]; if (fd.type !== 'toggle') v = String(v ?? '').trim(); else v = !!(v === true || isCommon(v)); fields[fd.h] = v; }
-    const exB = new Set();
+    const exB = new Map();
     for (const x of extrasOf(cur)){
-      if (x.bool){ if (canWriteBool()){ fields[x.h] = isTrue(vals[x.h]); exB.add(x.h); } }
+      if (x.bool){ if (canWriteBool(x)){ fields[x.h] = yesNoValue(x, isTrue(vals[x.h])); exB.set(x.h, x); } }
       else fields[x.h] = String(vals[x.h] ?? '').trim();
     }
     if (!fields[s.key]) return toast('Il campo ' + s.fields[0].label + ' è obbligatorio');
     if (edit){
       const changed = {}; for (const [h, v] of Object.entries(fields)){
-        const old = h === 'Comuni' ? isCommon(it.f[h]) : exB.has(h) ? isTrue(it.f[h]) : String(it.f[h] ?? '').trim(); if (old !== v) changed[h] = v; }
+        const old = h === 'Comuni' ? isCommon(it.f[h]) : String(it.f[h] ?? '').trim();
+        const same = exB.has(h) ? isTrue(it.f[h]) === isTrue(v) : old === v;
+        if (!same) changed[h] = v; }
       if (Object.keys(changed).length) queue({ type:'update', sheet:cur, row:it.row, key:it.key, fields:changed });
       const i = findItem(st.model, cur, fields[s.key], it.row); closeSheet(); if (i >= 0) setTimeout(() => openDetail(cur, i), 340);
       toast(Object.keys(changed).length ? 'Salvato' : 'Nessuna modifica');

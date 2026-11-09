@@ -462,7 +462,7 @@ function groupsOf(s){
     const k = norm(c); if (!g.has(k)) g.set(k, [c, [], false]); g.get(k)[1].push([it,i]); });
   const out = [...g.values()];
   const byTitle = (a, b) => a[0].title.localeCompare(b[0].title, 'it', { sensitivity:'base', ignorePunctuation:true });
-  for (const grp of out) grp[1].sort(byTitle);          // dentro ogni categoria: ordine alfabetico
+  if (s.id === 'Vocab') for (const grp of out) grp[1].sort(byTitle);   // solo Parole: ordine alfabetico dentro la categoria
   none.sort((a,b) => a[0].title.localeCompare(b[0].title, 'it', { sensitivity:'base', ignorePunctuation:true }));
   const L = new Map();
   for (const x of none){ const c = norm(x[0].title).replace(/[^a-z0-9]/g,'').charAt(0).toUpperCase(); const k = /[A-Z]/.test(c) ? c : '#';
